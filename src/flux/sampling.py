@@ -106,6 +106,11 @@ def denoise(
     timesteps: list[float],
     guidance: float = 4.0,
 ):
+    # Initialize lists to store outputs per timestep
+    double_block_img_outputs_per_timestep = []
+    double_block_txt_outputs_per_timestep = []
+    single_block_img_outputs_per_timestep = []
+
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
@@ -120,9 +125,26 @@ def denoise(
             guidance=guidance_vec,
         )
 
+        # Collect outputs from the model
+        double_block_img_outputs_per_timestep.append([out.clone() for out in model.double_block_img_outputs])
+        double_block_txt_outputs_per_timestep.append([out.clone() for out in model.double_block_txt_outputs])
+        single_block_img_outputs_per_timestep.append([out.clone() for out in model.single_block_img_outputs])
+
+        # Clear stored outputs to free memory
+        model.double_block_img_outputs.clear()
+        model.double_block_txt_outputs.clear()
+        model.single_block_img_outputs.clear()
+
         img = img + (t_prev - t_curr) * pred
 
-    return img
+    # Organize the outputs
+    outputs = {
+        'double_block_img_outputs_per_timestep': double_block_img_outputs_per_timestep,
+        'double_block_txt_outputs_per_timestep': double_block_txt_outputs_per_timestep,
+        'single_block_img_outputs_per_timestep': single_block_img_outputs_per_timestep,
+    }
+
+    return img, outputs
 
 
 def unpack(x: Tensor, height: int, width: int) -> Tensor:

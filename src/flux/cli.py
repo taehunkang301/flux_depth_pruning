@@ -1,10 +1,15 @@
 import os
 import re
+import json
 import time
 from dataclasses import dataclass
 from glob import iglob
 
+import numpy as np
+
 import torch
+import torch.nn.functional as F
+
 from einops import rearrange
 from fire import Fire
 from PIL import ExifTags, Image
@@ -93,6 +98,172 @@ def parse_prompt(options: SamplingOptions) -> SamplingOptions | None:
     return options
 
 
+def compute_cosine_similarities(output_list: list[torch.Tensor]) -> np.ndarray:
+    num_blocks = len(output_list)
+    similarities = np.zeros((num_blocks, num_blocks))
+
+    for i in range(num_blocks):
+        output_i = output_list[i].flatten(1)  # Shape: [batch_size, features]
+        for j in range(num_blocks):
+            output_j = output_list[j].flatten(1)
+            # Compute cosine similarity per sample and then average
+            sim = F.cosine_similarity(output_i, output_j, dim=1).mean().item()
+            similarities[i, j] = sim
+    return similarities
+
+
+def load_prompts(file_path, num_prompts=100):
+    prompts = []
+    with open(file_path, 'r') as f:
+        for _ in range(num_prompts):
+            line = f.readline()
+            if not line:
+                break
+            parts = line.strip().split('\t')
+            if len(parts) == 2:
+                prompts.append(parts[1])
+    return prompts
+
+
+def main(
+    name: str = "flux-schnell",
+    width: int = 256,
+    height: int = 256,
+    device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    num_steps: int = 4,
+    guidance: float = 3.5,
+    offload: bool = False,
+    output_dir: str = "output",
+    data_file: str = "/workspace/repo/flux/data/cc12m_1000.txt",
+    num_prompts: int = 1000,
+):
+    """
+    Main function to run the FLUX model and compute cosine similarities between block outputs.
+    """
+    torch_device = torch.device(device)
+    dtype = torch.bfloat16  # Adjust as needed
+
+    # Ensure output directory exists
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Load the first 100 prompts from CC12M dataset
+    prompts = load_prompts(data_file, num_prompts=num_prompts)
+    
+    # Load models
+    print("Loading models...")
+    t5 = load_t5(torch_device, max_length=256 if name == "flux-schnell" else 512)
+    clip = load_clip(torch_device)
+    model = load_flow_model(name, device="cpu" if offload else torch_device)
+    ae = load_ae(name, device="cpu" if offload else torch_device)
+    
+    # Initialize random generator
+    rng = torch.Generator(device="cpu")
+    
+    # Initialize a list to store all similarities
+    all_similarities = []
+    
+    # Adjust height and width to be multiples of 16
+    height = 16 * (height // 16)
+    width = 16 * (width // 16)
+    
+    for prompt_idx, prompt in enumerate(prompts):
+        print(f"\nProcessing prompt {prompt_idx+1}/{len(prompts)}: {prompt}")
+        
+        # Prepare options
+        opts = SamplingOptions(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_steps=num_steps,
+            guidance=guidance,
+            seed=0,  # You can set a specific seed if needed
+        )
+        
+        # Parse prompt if needed (assuming parse_prompt returns opts)
+        # opts = parse_prompt(opts)
+        
+        # Generate initial noise
+        x = get_noise(
+            1,  # batch size of 1
+            opts.height,
+            opts.width,
+            device=torch_device,
+            dtype=dtype,
+            seed=opts.seed,
+        )
+        
+        if offload:
+            ae = ae.cpu()
+            torch.cuda.empty_cache()
+            t5, clip = t5.to(torch_device), clip.to(torch_device)
+        
+        # Prepare inputs
+        inp = prepare(t5, clip, x, prompt=opts.prompt)
+        timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
+        
+        # Offload models if necessary
+        if offload:
+            t5, clip = t5.cpu(), clip.cpu()
+            torch.cuda.empty_cache()
+            model = model.to(torch_device)
+        
+        # Denoise initial noise and collect outputs
+        x, outputs = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
+        
+        # Compute cosine similarities per timestep
+        for timestep_idx in range(len(timesteps) - 1):
+            timestep_data = {
+                'prompt': prompt,
+                'timestep': timestep_idx,
+                'double_block_img_sims': None,
+                'double_block_txt_sims': None,
+                'single_block_img_sims': None,
+            }
+            
+            # DoubleStreamBlocks image outputs
+            double_img_outputs = outputs['double_block_img_outputs_per_timestep'][timestep_idx]
+            double_img_sims = compute_cosine_similarities(double_img_outputs)
+            timestep_data['double_block_img_sims'] = double_img_sims.tolist()
+            
+            # DoubleStreamBlocks text outputs
+            double_txt_outputs = outputs['double_block_txt_outputs_per_timestep'][timestep_idx]
+            double_txt_sims = compute_cosine_similarities(double_txt_outputs)
+            timestep_data['double_block_txt_sims'] = double_txt_sims.tolist()
+            
+            # SingleStreamBlocks image outputs
+            single_img_outputs = outputs['single_block_img_outputs_per_timestep'][timestep_idx]
+            single_img_sims = compute_cosine_similarities(single_img_outputs)
+            timestep_data['single_block_img_sims'] = single_img_sims.tolist()
+            
+            # Append the data
+            all_similarities.append(timestep_data)
+        
+        # Offload model, load autoencoder to GPU if necessary
+        if offload:
+            model.cpu()
+            torch.cuda.empty_cache()
+            ae.decoder.to(x.device)
+        
+        # Decode latents to pixel space if needed
+        # x = unpack(x.float(), opts.height, opts.width)
+        # with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
+        #     x = ae.decode(x)
+        
+        # Save or process the image if needed
+        # ...
+
+    # Save all similarities to a JSON file
+    similarities_file = os.path.join(output_dir, 'similarities.json')
+    print(f"\nSaving similarities to {similarities_file}")
+    with open(similarities_file, 'w') as f:
+        json.dump(all_similarities, f)
+    
+    print("Processing complete.")
+
+
+
+'''
 @torch.inference_mode()
 def main(
     name: str = "flux-schnell",
@@ -247,7 +418,7 @@ def main(
             opts = parse_prompt(opts)
         else:
             opts = None
-
+'''
 
 def app():
     Fire(main)
