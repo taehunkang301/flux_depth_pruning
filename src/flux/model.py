@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
-
+import random 
 from flux.modules.layers import (DoubleStreamBlock, EmbedND, LastLayer,
                                  MLPEmbedder, SingleStreamBlock,
                                  timestep_embedding)
@@ -100,12 +100,26 @@ class Flux(nn.Module):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
 
-        for block in self.double_blocks:
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+
+        omitted_idx = []
+        for idx, block in enumerate(self.double_blocks):
+            if idx == 0 or idx == len(self.double_blocks) or random.randint(1, 10) < 10:
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+            else:
+                omitted_idx.append(idx)
+
+        print(f"Omitted double block idx: {omitted_idx}")
 
         img = torch.cat((txt, img), 1)
-        for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe)
+        
+        omitted_idx = []
+        for idx, block in enumerate(self.single_blocks):
+            if idx == 0 or idx == len(self.single_blocks) or random.randint(1, 10) < 10:
+                img = block(img, vec=vec, pe=pe)
+            else:
+                omitted_idx.append(idx)
+
+        print(f"Omitted double block idx: {omitted_idx}")
         img = img[:, txt.shape[1] :, ...]
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
