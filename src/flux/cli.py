@@ -216,25 +216,19 @@ def main(
             timestep_data = {
                 'prompt': prompt,
                 'timestep': timestep_idx,
-                'double_block_img_sims': None,
-                'double_block_txt_sims': None,
-                'single_block_img_sims': None,
+                'double_block_sims': None,
+                'single_block_sims': None,
             }
             
             # DoubleStreamBlocks image outputs
-            double_img_outputs = outputs['double_block_img_outputs_per_timestep'][timestep_idx]
-            double_img_sims = compute_cosine_similarities(double_img_outputs)
-            timestep_data['double_block_img_sims'] = double_img_sims.tolist()
-            
-            # DoubleStreamBlocks text outputs
-            double_txt_outputs = outputs['double_block_txt_outputs_per_timestep'][timestep_idx]
-            double_txt_sims = compute_cosine_similarities(double_txt_outputs)
-            timestep_data['double_block_txt_sims'] = double_txt_sims.tolist()
+            double_outputs = outputs['double_block_outputs_per_timestep'][timestep_idx]
+            double_sims = compute_cosine_similarities(double_outputs)
+            timestep_data['double_block_sims'] = double_sims.tolist()
             
             # SingleStreamBlocks image outputs
-            single_img_outputs = outputs['single_block_img_outputs_per_timestep'][timestep_idx]
-            single_img_sims = compute_cosine_similarities(single_img_outputs)
-            timestep_data['single_block_img_sims'] = single_img_sims.tolist()
+            single_outputs = outputs['single_block_outputs_per_timestep'][timestep_idx]
+            single_sims = compute_cosine_similarities(single_outputs)
+            timestep_data['single_block_sims'] = single_sims.tolist()
             
             # Append the data
             all_similarities.append(timestep_data)
