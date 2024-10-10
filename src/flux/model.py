@@ -103,7 +103,10 @@ class Flux(nn.Module):
 
         omitted_idx = []
         for idx, block in enumerate(self.double_blocks):
-            if idx == 0 or idx == len(self.double_blocks) or random.randint(1, 10) < 10:
+            #if idx == 0 or idx == len(self.double_blocks) or random.randint(1, 10) < 10:
+            #if idx not in [7, 5, 8, 4]:
+            if idx not in [11, 17]:
+            #if True:
                 img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
             else:
                 omitted_idx.append(idx)
@@ -114,7 +117,10 @@ class Flux(nn.Module):
         
         omitted_idx = []
         for idx, block in enumerate(self.single_blocks):
-            if idx == 0 or idx == len(self.single_blocks) or random.randint(1, 10) < 10:
+            #if idx == 0 or idx == len(self.single_blocks) or random.randint(1, 10) < 10:
+            #if idx not in [0, 12, 3, 4, 5, 13, 2, 17]:
+            if idx not in [35, 33, 34, 36]:
+            #if True:
                 img = block(img, vec=vec, pe=pe)
             else:
                 omitted_idx.append(idx)
