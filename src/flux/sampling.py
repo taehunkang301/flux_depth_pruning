@@ -112,27 +112,29 @@ def denoise(
 
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
-    for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
-        t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
-        pred = model(
-            img=img,
-            img_ids=img_ids,
-            txt=txt,
-            txt_ids=txt_ids,
-            y=vec,
-            timesteps=t_vec,
-            guidance=guidance_vec,
-        )
+    
+    with torch.no_grad():
+        for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
+            t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
+            pred = model(
+                img=img,
+                img_ids=img_ids,
+                txt=txt,
+                txt_ids=txt_ids,
+                y=vec,
+                timesteps=t_vec,
+                guidance=guidance_vec,
+            )
 
-        # Collect outputs from the model
-        double_block_outputs_per_timestep.append([out.clone() for out in model.double_block_outputs])
-        single_block_outputs_per_timestep.append([out.clone() for out in model.single_block_outputs])
+            # Collect outputs from the model
+            double_block_outputs_per_timestep.append([out.clone() for out in model.double_block_outputs])
+            single_block_outputs_per_timestep.append([out.clone() for out in model.single_block_outputs])
 
-        # Clear stored outputs to free memory
-        model.double_block_outputs.clear()
-        model.single_block_outputs.clear()
+            # Clear stored outputs to free memory
+            model.double_block_outputs.clear()
+            model.single_block_outputs.clear()
 
-        img = img + (t_prev - t_curr) * pred
+            img = img + (t_prev - t_curr) * pred
 
     # Organize the outputs
     outputs = {

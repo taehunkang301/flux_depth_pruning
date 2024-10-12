@@ -126,16 +126,16 @@ def load_prompts(file_path, num_prompts=100):
 
 
 def main(
-    name: str = "flux-schnell",
+    name: str = "flux-dev",
     width: int = 256,
     height: int = 256,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
-    num_steps: int = 4,
+    num_steps: int = 50,
     guidance: float = 3.5,
     offload: bool = False,
     output_dir: str = "output",
     data_file: str = "/workspace/repo/flux/data/cc12m_1000.txt",
-    num_prompts: int = 1000,
+    num_prompts: int = 100,
 ):
     """
     Main function to run the FLUX model and compute cosine similarities between block outputs.

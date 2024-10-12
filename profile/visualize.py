@@ -5,7 +5,7 @@ import seaborn as sns
 import os
 
 # Load the similarities from the JSON file
-with open('/workspace/repo/flux/output/similarities.json', 'r') as f:
+with open('/workspace/repo/flux/output/similarities_dev_joint_100.json', 'r') as f:
     all_similarities = json.load(f)
 
 # Initialize dictionaries to accumulate similarities per timestep
@@ -82,7 +82,7 @@ print("Double_txt: ", sorted_double_txt)
 print("Single_img: ", sorted_single_img)
 
 # Create a directory to save the plots if it doesn't exist
-output_dir = 'average_similarity_maps_per_timestep'
+output_dir = 'average_similarity_maps_dev_100'
 os.makedirs(output_dir, exist_ok=True)
 
 # Sort timesteps for consistent ordering
