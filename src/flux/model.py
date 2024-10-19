@@ -104,7 +104,10 @@ class Flux(nn.Module):
         self.double_block_outputs = []
         self.single_block_outputs = []
 
-        for block in self.double_blocks:
+        for idx, block in enumerate(self.double_blocks):
+            if idx == 5:
+                continue
+
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
             # Store the outputs
             concat_output = torch.cat((txt, img), 1)

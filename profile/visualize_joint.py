@@ -5,6 +5,7 @@ import seaborn as sns
 import os
 
 # Load the similarities from the JSON file
+#with open('/workspace/repo/flux/output/similarities_dev_joint_d5_100.json', 'r') as f:
 with open('/workspace/repo/flux/output/similarities_dev_joint_100.json', 'r') as f:
     all_similarities = json.load(f)
 
@@ -74,6 +75,24 @@ sorted_single_sim = sorted(range(len(score_single_sim)), key=lambda i: score_sin
 
 print("Double sim: ", sorted_double_sim)
 print("Single sim: ", sorted_single_sim)
+
+def get_sorted_index_list(double, single):
+    # Create a combined list of tuples, each tuple will hold the value, index and the prefix ('D' for double, 'S' for single)
+    combined = [('D'+str(i), value) for i, value in enumerate(double)] + [('S'+str(i), value) for i, value in enumerate(single)]
+    
+    # Sort this combined list by the value in descending order
+    sorted_combined = sorted(combined, key=lambda x: x[1], reverse=True)
+    
+    # Extract only the prefixed indexes in order
+    sorted_indexes = [item[0] for item in sorted_combined]
+    
+    return sorted_indexes
+
+
+print("Whole sim: ", get_sorted_index_list(score_double_sim, score_single_sim))
+
+raise
+
 
 # Create a directory to save the plots if it doesn't exist
 output_dir = 'average_similarity_maps_dev_100'
