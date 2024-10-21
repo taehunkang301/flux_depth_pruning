@@ -105,10 +105,10 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
+    skip_idx: list[int],
 ):
     # Initialize lists to store outputs per timestep
-    double_block_outputs_per_timestep = []
-    single_block_outputs_per_timestep = []
+    outputs_per_timestep = []
 
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
@@ -124,23 +124,19 @@ def denoise(
                 y=vec,
                 timesteps=t_vec,
                 guidance=guidance_vec,
+                skip_idx=skip_idx,
             )
 
             # Collect outputs from the model
-            double_block_outputs_per_timestep.append([out.clone() for out in model.double_block_outputs])
-            single_block_outputs_per_timestep.append([out.clone() for out in model.single_block_outputs])
+            outputs_per_timestep.append([out.clone() for out in model.block_outputs])
 
             # Clear stored outputs to free memory
-            model.double_block_outputs.clear()
-            model.single_block_outputs.clear()
+            model.block_outputs.clear()
 
             img = img + (t_prev - t_curr) * pred
 
     # Organize the outputs
-    outputs = {
-        'double_block_outputs_per_timestep': double_block_outputs_per_timestep,
-        'single_block_outputs_per_timestep': single_block_outputs_per_timestep,
-    }
+    outputs = outputs_per_timestep
 
     return img, outputs
 

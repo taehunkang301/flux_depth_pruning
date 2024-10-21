@@ -97,19 +97,28 @@ def parse_prompt(options: SamplingOptions) -> SamplingOptions | None:
         options.prompt = prompt
     return options
 
+def compute_per_layer_score(tensor_list: list[torch.Tensor], mode="sim") -> tuple[np.ndarray, int]:
 
-def compute_cosine_similarities(output_list: list[torch.Tensor]) -> np.ndarray:
-    num_blocks = len(output_list)
-    similarities = np.zeros((num_blocks, num_blocks))
+    if mode == "sim":
+        return compute_cosine_similarities(tensor_list=tensor_list)
+    else:
+        print("Not Implemented Option")
+        raise
 
-    for i in range(num_blocks):
-        output_i = output_list[i].flatten(1)  # Shape: [batch_size, features]
-        for j in range(num_blocks):
-            output_j = output_list[j].flatten(1)
-            # Compute cosine similarity per sample and then average
-            sim = F.cosine_similarity(output_i, output_j, dim=1).mean().item()
-            similarities[i, j] = sim
-    return similarities
+
+def compute_cosine_similarities(tensor_list: list[torch.Tensor]) -> tuple[np.ndarray, int]:
+    num_blocks = len(tensor_list)
+    similarities = np.zeros(num_blocks - 1)
+
+    for i in range(num_blocks - 1):
+        input_i = tensor_list[i].flatten(1)
+        output_i = tensor_list[i+1].flatten(1)  # Shape: [batch_size, features]
+        sim = F.cosine_similarity(input_i, output_i, dim=1).mean().item()
+        similarities[i] = sim
+
+    max_idx = int(np.argmax(similarities))
+
+    return similarities, max_idx
 
 
 def load_prompts(file_path, num_prompts=100):
@@ -136,6 +145,8 @@ def main(
     output_dir: str = "output",
     data_file: str = "/workspace/repo/flux/data/cc12m_1000.txt",
     num_prompts: int = 100,
+    score_mode: str = "sim",
+    skip_cnt: int = 8
 ):
     """
     Main function to run the FLUX model and compute cosine similarities between block outputs.
@@ -166,253 +177,93 @@ def main(
     # Adjust height and width to be multiples of 16
     height = 16 * (height // 16)
     width = 16 * (width // 16)
-    
-    for prompt_idx, prompt in enumerate(prompts):
-        print(f"\nProcessing prompt {prompt_idx+1}/{len(prompts)}: {prompt}")
-        
-        # Prepare options
-        opts = SamplingOptions(
-            prompt=prompt,
-            width=width,
-            height=height,
-            num_steps=num_steps,
-            guidance=guidance,
-            seed=0,  # You can set a specific seed if needed
-        )
-        
-        # Parse prompt if needed (assuming parse_prompt returns opts)
-        # opts = parse_prompt(opts)
-        
-        # Generate initial noise
-        x = get_noise(
-            1,  # batch size of 1
-            opts.height,
-            opts.width,
-            device=torch_device,
-            dtype=dtype,
-            seed=opts.seed,
-        )
-        
-        if offload:
-            ae = ae.cpu()
-            torch.cuda.empty_cache()
-            t5, clip = t5.to(torch_device), clip.to(torch_device)
-        
-        # Prepare inputs
-        inp = prepare(t5, clip, x, prompt=opts.prompt)
-        timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
-        
-        # Offload models if necessary
-        if offload:
-            t5, clip = t5.cpu(), clip.cpu()
-            torch.cuda.empty_cache()
-            model = model.to(torch_device)
-        
-        # Denoise initial noise and collect outputs
-        x, outputs = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
-        
-        # Compute cosine similarities per timestep
-        for timestep_idx in range(len(timesteps) - 1):
-            timestep_data = {
-                'prompt': prompt,
-                'timestep': timestep_idx,
-                'double_block_sims': None,
-                'single_block_sims': None,
-            }
+
+    skip_idx = []
+    for _ in range(skip_cnt + 1):
+        for prompt_idx, prompt in enumerate(prompts):
+
+            #############
+
+
+            # On-going
+            # TODO
+            # Gather all-prompts at once and then compute max idx
+            # How about timestep difference?
+
+
+            #############
+
+
+
+
+            # Prepare options
+            opts = SamplingOptions(
+                prompt=prompt,
+                width=width,
+                height=height,
+                num_steps=num_steps,
+                guidance=guidance,
+                seed=0,  # You can set a specific seed if needed
+            )
             
-            # DoubleStreamBlocks image outputs
-            double_outputs = outputs['double_block_outputs_per_timestep'][timestep_idx]
-            double_sims = compute_cosine_similarities(double_outputs)
-            timestep_data['double_block_sims'] = double_sims.tolist()
+            # Generate initial noise
+            x = get_noise(
+                1,  # batch size of 1
+                opts.height,
+                opts.width,
+                device=torch_device,
+                dtype=dtype,
+                seed=opts.seed,
+            )
             
-            # SingleStreamBlocks image outputs
-            single_outputs = outputs['single_block_outputs_per_timestep'][timestep_idx]
-            single_sims = compute_cosine_similarities(single_outputs)
-            timestep_data['single_block_sims'] = single_sims.tolist()
+            if offload:
+                ae = ae.cpu()
+                torch.cuda.empty_cache()
+                t5, clip = t5.to(torch_device), clip.to(torch_device)
             
-            # Append the data
-            all_similarities.append(timestep_data)
-        
-        # Offload model, load autoencoder to GPU if necessary
-        if offload:
-            model.cpu()
-            torch.cuda.empty_cache()
-            ae.decoder.to(x.device)
-        
-        # Decode latents to pixel space if needed
-        # x = unpack(x.float(), opts.height, opts.width)
-        # with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
-        #     x = ae.decode(x)
-        
-        # Save or process the image if needed
-        # ...
+            # Prepare inputs
+            inp = prepare(t5, clip, x, prompt=opts.prompt)
+            timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
+            
+            # Offload models if necessary
+            if offload:
+                t5, clip = t5.cpu(), clip.cpu()
+                torch.cuda.empty_cache()
+                model = model.to(torch_device)
+            
+            # Denoise initial noise and collect outputs
+            x, outputs_per_timestep = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance, skip_idx=)
+            
+            # Compute cosine similarities per timestep
+            for timestep_idx in range(len(timesteps) - 1):
+                timestep_data = {
+                    'prompt': prompt,
+                    'timestep': timestep_idx,
+                    'redundant_idx': None,
+                    'block_score': None,
+                }
+                
+                # DoubleStreamBlocks image outputs
+                block_score, max_idx = compute_per_layer_score(outputs_per_timestep[timestep_idx], mode=score_mode)
+                timestep_data['redundant_idx'] = max_idx
+                timestep_data['block_score'] = block_score.tolist()
+                
+                # Append the data
+                all_similarities.append(timestep_data)
+            
+            # Offload model, load autoencoder to GPU if necessary
+            if offload:
+                model.cpu()
+                torch.cuda.empty_cache()
+                ae.decoder.to(x.device)
 
     # Save all similarities to a JSON file
-    similarities_file = os.path.join(output_dir, 'similarities.json')
-    print(f"\nSaving similarities to {similarities_file}")
+    similarities_file = os.path.join(output_dir, f'block_score_{score_mode}.json')
+    print(f"\nSaving redundancy score ({score_mode}) to {similarities_file}")
     with open(similarities_file, 'w') as f:
         json.dump(all_similarities, f)
     
     print("Processing complete.")
-
-
-
-'''
-@torch.inference_mode()
-def main(
-    name: str = "flux-schnell",
-    width: int = 1360,
-    height: int = 768,
-    seed: int | None = None,
-    prompt: str = (
-        "a photo of a forest with mist swirling around the tree trunks. The word "
-        '"FLUX" is painted over it in big, red brush strokes with visible texture'
-    ),
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
-    num_steps: int | None = None,
-    loop: bool = False,
-    guidance: float = 3.5,
-    offload: bool = False,
-    output_dir: str = "output",
-    add_sampling_metadata: bool = True,
-):
-    """
-    Sample the flux model. Either interactively (set `--loop`) or run for a
-    single image.
-
-    Args:
-        name: Name of the model to load
-        height: height of the sample in pixels (should be a multiple of 16)
-        width: width of the sample in pixels (should be a multiple of 16)
-        seed: Set a seed for sampling
-        output_name: where to save the output image, `{idx}` will be replaced
-            by the index of the sample
-        prompt: Prompt used for sampling
-        device: Pytorch device
-        num_steps: number of sampling steps (default 4 for schnell, 50 for guidance distilled)
-        loop: start an interactive session and sample multiple times
-        guidance: guidance value used for guidance distillation
-        add_sampling_metadata: Add the prompt to the image Exif metadata
-    """
-    nsfw_classifier = pipeline("image-classification", model="Falconsai/nsfw_image_detection", device=device)
-
-    if name not in configs:
-        available = ", ".join(configs.keys())
-        raise ValueError(f"Got unknown model name: {name}, chose from {available}")
-
-    torch_device = torch.device(device)
-    if num_steps is None:
-        num_steps = 4 if name == "flux-schnell" else 50
-
-    # allow for packing and conversion to latent space
-    height = 16 * (height // 16)
-    width = 16 * (width // 16)
-
-    output_name = os.path.join(output_dir, "img_{idx}.jpg")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        idx = 0
-    else:
-        fns = [fn for fn in iglob(output_name.format(idx="*")) if re.search(r"img_[0-9]+\.jpg$", fn)]
-        if len(fns) > 0:
-            idx = max(int(fn.split("_")[-1].split(".")[0]) for fn in fns) + 1
-        else:
-            idx = 0
-
-    # init all components
-    t5 = load_t5(torch_device, max_length=256 if name == "flux-schnell" else 512)
-    clip = load_clip(torch_device)
-    model = load_flow_model(name, device="cpu" if offload else torch_device)
-    ae = load_ae(name, device="cpu" if offload else torch_device)
-
-    rng = torch.Generator(device="cpu")
-    opts = SamplingOptions(
-        prompt=prompt,
-        width=width,
-        height=height,
-        num_steps=num_steps,
-        guidance=guidance,
-        seed=seed,
-    )
-
-    if loop:
-        opts = parse_prompt(opts)
-
-    while opts is not None:
-        if opts.seed is None:
-            opts.seed = rng.seed()
-        print(f"Generating with seed {opts.seed}:\n{opts.prompt}")
-        t0 = time.perf_counter()
-
-        # prepare input
-        x = get_noise(
-            1,
-            opts.height,
-            opts.width,
-            device=torch_device,
-            dtype=torch.bfloat16,
-            seed=opts.seed,
-        )
-        opts.seed = None
-        if offload:
-            ae = ae.cpu()
-            torch.cuda.empty_cache()
-            t5, clip = t5.to(torch_device), clip.to(torch_device)
-        inp = prepare(t5, clip, x, prompt=opts.prompt)
-        timesteps = get_schedule(opts.num_steps, inp["img"].shape[1], shift=(name != "flux-schnell"))
-
-        # offload TEs to CPU, load model to gpu
-        if offload:
-            t5, clip = t5.cpu(), clip.cpu()
-            torch.cuda.empty_cache()
-            model = model.to(torch_device)
-
-        # denoise initial noise
-        x = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance)
-
-        # offload model, load autoencoder to gpu
-        if offload:
-            model.cpu()
-            torch.cuda.empty_cache()
-            ae.decoder.to(x.device)
-
-        # decode latents to pixel space
-        x = unpack(x.float(), opts.height, opts.width)
-        with torch.autocast(device_type=torch_device.type, dtype=torch.bfloat16):
-            x = ae.decode(x)
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        t1 = time.perf_counter()
-
-        fn = output_name.format(idx=idx)
-        print(f"Done in {t1 - t0:.1f}s. Saving {fn}")
-        # bring into PIL format and save
-        x = x.clamp(-1, 1)
-        x = embed_watermark(x.float())
-        x = rearrange(x[0], "c h w -> h w c")
-
-        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
-        nsfw_score = [x["score"] for x in nsfw_classifier(img) if x["label"] == "nsfw"][0]
-        
-        if nsfw_score < NSFW_THRESHOLD:
-            exif_data = Image.Exif()
-            exif_data[ExifTags.Base.Software] = "AI generated;txt2img;flux"
-            exif_data[ExifTags.Base.Make] = "Black Forest Labs"
-            exif_data[ExifTags.Base.Model] = name
-            if add_sampling_metadata:
-                exif_data[ExifTags.Base.ImageDescription] = prompt
-            img.save(fn, exif=exif_data, quality=95, subsampling=0)
-            idx += 1
-        else:
-            print("Your generated image may contain NSFW content.")
-
-        if loop:
-            print("-" * 80)
-            opts = parse_prompt(opts)
-        else:
-            opts = None
-'''
 
 def app():
     Fire(main)

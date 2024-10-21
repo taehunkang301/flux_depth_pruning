@@ -83,10 +83,14 @@ class Flux(nn.Module):
         timesteps: Tensor,
         y: Tensor,
         guidance: Tensor | None = None,
+        skip_idx: list | None = None,
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
-
+        
+        if skip_idx is None:
+            skip_idx = []
+        
         # running on sequences img
         img = self.img_in(img)
         vec = self.time_in(timestep_embedding(timesteps, 256))
@@ -101,23 +105,26 @@ class Flux(nn.Module):
         pe = self.pe_embedder(ids)
 
         # Initialize lists to store outputs per block
-        self.double_block_outputs = []
-        self.single_block_outputs = []
+        first_inp = torch.cat((txt, img), 1)
+        self.block_outputs = [first_inp.clone()]
 
         for idx, block in enumerate(self.double_blocks):
-            if idx == 5:
+            if idx in skip_idx:
                 continue
 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
             # Store the outputs
             concat_output = torch.cat((txt, img), 1)
-            self.double_block_outputs.append(concat_output.clone())
+            self.block_outputs.append(concat_output.clone())
         img = torch.cat((txt, img), 1)
 
-        for block in self.single_blocks:
+        for idx, block in enumerate(self.single_blocks, start=len(self.double_blocks)):
+            if idx in skip_idx:
+                continue
+
             img = block(img, vec=vec, pe=pe)
             # Store the outputs
-            self.single_block_outputs.append(img.clone())
+            self.block_outputs.append(img.clone())
 
         img = img[:, txt.shape[1] :, ...]
 
