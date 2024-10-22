@@ -97,7 +97,7 @@ def parse_prompt(options: SamplingOptions) -> SamplingOptions | None:
         options.prompt = prompt
     return options
 
-def compute_per_layer_score(tensor_list: list[torch.Tensor], mode="sim") -> tuple[np.ndarray, int]:
+def compute_per_layer_score(tensor_list: list[torch.Tensor], mode="sim") -> np.ndarray:
 
     if mode == "sim":
         return compute_cosine_similarities(tensor_list=tensor_list)
@@ -106,7 +106,7 @@ def compute_per_layer_score(tensor_list: list[torch.Tensor], mode="sim") -> tupl
         raise
 
 
-def compute_cosine_similarities(tensor_list: list[torch.Tensor]) -> tuple[np.ndarray, int]:
+def compute_cosine_similarities(tensor_list: list[torch.Tensor]) -> np.ndarray:
     num_blocks = len(tensor_list)
     similarities = np.zeros(num_blocks - 1)
 
@@ -116,9 +116,7 @@ def compute_cosine_similarities(tensor_list: list[torch.Tensor]) -> tuple[np.nda
         sim = F.cosine_similarity(input_i, output_i, dim=1).mean().item()
         similarities[i] = sim
 
-    max_idx = int(np.argmax(similarities))
-
-    return similarities, max_idx
+    return similarities
 
 
 def load_prompts(file_path, num_prompts=100):
@@ -171,15 +169,17 @@ def main(
     # Initialize random generator
     rng = torch.Generator(device="cpu")
     
-    # Initialize a list to store all similarities
-    all_similarities = []
-    
     # Adjust height and width to be multiples of 16
     height = 16 * (height // 16)
     width = 16 * (width // 16)
 
     skip_idx = []
     for _ in range(skip_cnt + 1):
+
+        # Initialize a list to store all similarities
+        prompts_score = []
+        
+        # Traverse target prompts
         for prompt_idx, prompt in enumerate(prompts):
 
             #############
@@ -192,9 +192,6 @@ def main(
 
 
             #############
-
-
-
 
             # Prepare options
             opts = SamplingOptions(
@@ -232,30 +229,36 @@ def main(
                 model = model.to(torch_device)
             
             # Denoise initial noise and collect outputs
-            x, outputs_per_timestep = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance, skip_idx=)
+            x, outputs_per_timestep = denoise(model, **inp, timesteps=timesteps, guidance=opts.guidance, skip_idx=skip_idx)
             
             # Compute cosine similarities per timestep
             for timestep_idx in range(len(timesteps) - 1):
                 timestep_data = {
                     'prompt': prompt,
                     'timestep': timestep_idx,
-                    'redundant_idx': None,
                     'block_score': None,
                 }
                 
                 # DoubleStreamBlocks image outputs
-                block_score, max_idx = compute_per_layer_score(outputs_per_timestep[timestep_idx], mode=score_mode)
+                block_score = compute_per_layer_score(outputs_per_timestep[timestep_idx], mode=score_mode)
                 timestep_data['redundant_idx'] = max_idx
                 timestep_data['block_score'] = block_score.tolist()
                 
                 # Append the data
-                all_similarities.append(timestep_data)
+                prompts_score.append(timestep_data)
             
             # Offload model, load autoencoder to GPU if necessary
             if offload:
                 model.cpu()
                 torch.cuda.empty_cache()
                 ae.decoder.to(x.device)
+
+        block_scores = [d['block_score'] for d in prompts_score if d['block_score'] is not None]
+        average_block_score = np.mean(block_scores, axis=0)
+        target_idx = np.argmax(average_block_score)
+        skip_idx.append(target_idx)
+        
+    print("Skip idx:", skip_idx)
 
     # Save all similarities to a JSON file
     similarities_file = os.path.join(output_dir, f'block_score_{score_mode}.json')
