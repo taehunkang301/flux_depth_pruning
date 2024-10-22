@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from glob import iglob
 
 import numpy as np
-
+from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 
@@ -133,11 +133,11 @@ def load_prompts(file_path, num_prompts=100):
 
 
 def main(
-    name: str = "flux-dev",
+    name: str = "flux-schnell",
     width: int = 256,
     height: int = 256,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
-    num_steps: int = 50,
+    num_steps: int = 4,
     guidance: float = 3.5,
     offload: bool = False,
     output_dir: str = "output",
@@ -174,24 +174,15 @@ def main(
     width = 16 * (width // 16)
 
     skip_idx = []
-    for _ in range(skip_cnt + 1):
+    num_blocks = 0
+
+    for _ in tqdm(range(skip_cnt + 1)):
 
         # Initialize a list to store all similarities
         prompts_score = []
         
         # Traverse target prompts
-        for prompt_idx, prompt in enumerate(prompts):
-
-            #############
-
-
-            # On-going
-            # TODO
-            # Gather all-prompts at once and then compute max idx
-            # How about timestep difference?
-
-
-            #############
+        for prompt_idx, prompt in tqdm(enumerate(prompts)):
 
             # Prepare options
             opts = SamplingOptions(
@@ -241,7 +232,6 @@ def main(
                 
                 # DoubleStreamBlocks image outputs
                 block_score = compute_per_layer_score(outputs_per_timestep[timestep_idx], mode=score_mode)
-                timestep_data['redundant_idx'] = max_idx
                 timestep_data['block_score'] = block_score.tolist()
                 
                 # Append the data
@@ -253,18 +243,26 @@ def main(
                 torch.cuda.empty_cache()
                 ae.decoder.to(x.device)
 
+        if num_blocks == 0:
+            num_blocks = len(prompts_score)
+
         block_scores = [d['block_score'] for d in prompts_score if d['block_score'] is not None]
         average_block_score = np.mean(block_scores, axis=0)
         target_idx = np.argmax(average_block_score)
-        skip_idx.append(target_idx)
-        
+        remaining_idx = [i for i in range(num_blocks) if i not in skip_idx]
+        original_target_idx = remaining_idx[target_idx]
+
+        skip_idx.append(int(original_target_idx))
+        print(f"Skip {original_target_idx}")
+
+
     print("Skip idx:", skip_idx)
 
     # Save all similarities to a JSON file
     similarities_file = os.path.join(output_dir, f'block_score_{score_mode}.json')
-    print(f"\nSaving redundancy score ({score_mode}) to {similarities_file}")
+    print(f"\nSaving skip idx with mode ({score_mode}) to {similarities_file}")
     with open(similarities_file, 'w') as f:
-        json.dump(all_similarities, f)
+        json.dump(skip_idx, f)
     
     print("Processing complete.")
 

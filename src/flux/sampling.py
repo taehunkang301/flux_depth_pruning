@@ -105,7 +105,7 @@ def denoise(
     # sampling parameters
     timesteps: list[float],
     guidance: float = 4.0,
-    skip_idx: list[int],
+    skip_idx: list[int] = [],
 ):
     # Initialize lists to store outputs per timestep
     outputs_per_timestep = []
